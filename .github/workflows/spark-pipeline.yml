@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   spark-job:
     runs-on: self-hosted
@@ -21,7 +24,7 @@ jobs:
       run: |
         export KUBECONFIG=/root/.kube/config
         MINIO_IP=$(kubectl -n minio get svc minio -o jsonpath='{.spec.clusterIP}')
-        kubectl run spark-ci --rm -it \
+        kubectl run spark-ci --rm --attach \
           --image=localhost:5001/spark-s3:3.5.1 \
           --restart=Never \
           --command -- /opt/spark/bin/spark-submit \
@@ -47,9 +50,17 @@ jobs:
       run: |
         export KUBECONFIG=/root/.kube/config
         MINIO_IP=$(kubectl -n minio get svc minio -o jsonpath='{.spec.clusterIP}')
-        kubectl run mc-verify --rm -it \
+        kubectl run mc-verify --rm --attach \
           --image=minio/mc:latest --restart=Never --command -- sh -c "
             mc alias set myminio http://${MINIO_IP}:9000 minioadmin minioadmin
+            echo '=== List output files ==='
             mc ls myminio/datatest/spark-output/pi_result.csv/
-            mc cat myminio/datatest/spark-output/pi_result.csv/part-00001-*.csv
+            echo '=== Read first part file ==='
+            PART_FILE=\$(mc ls myminio/datatest/spark-output/pi_result.csv/ | grep 'part-' | awk '{print \$NF}' | head -1)
+            if [ -n \"\$PART_FILE\" ]; then
+              mc cat myminio/datatest/spark-output/pi_result.csv/\$PART_FILE
+            else
+              echo 'No part file found'
+              exit 1
+            fi
           "
