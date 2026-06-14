@@ -1,0 +1,55 @@
+name: Spark Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  spark-job:
+    runs-on: self-hosted
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      run: |
+        export KUBECONFIG=/root/.kube/config
+        kubectl version --client
+
+    - name: Submit Spark job to k3s
+      run: |
+        export KUBECONFIG=/root/.kube/config
+        MINIO_IP=$(kubectl -n minio get svc minio -o jsonpath='{.spec.clusterIP}')
+        kubectl run spark-ci --rm -it \
+          --image=localhost:5001/spark-s3:3.5.1 \
+          --restart=Never \
+          --command -- /opt/spark/bin/spark-submit \
+          --master k8s://https://kubernetes.default.svc:443 \
+          --deploy-mode cluster \
+          --conf spark.executor.instances=1 \
+          --conf spark.executor.cores=1 \
+          --conf spark.executor.memory=1g \
+          --conf spark.driver.memory=1g \
+          --conf spark.kubernetes.container.image=localhost:5001/spark-s3:3.5.1 \
+          --conf spark.kubernetes.authenticate.driver.serviceAccountName=default \
+          --conf spark.kubernetes.namespace=default \
+          --conf spark.hadoop.fs.s3a.endpoint=http://${MINIO_IP}:9000 \
+          --conf spark.hadoop.fs.s3a.access.key=minioadmin \
+          --conf spark.hadoop.fs.s3a.secret.key=minioadmin \
+          --conf spark.hadoop.fs.s3a.path.style=true \
+          --conf spark.hadoop.fs.s3a.path.style.access=true \
+          --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
+          --conf spark.hadoop.fs.s3a.connection.ssl.enabled=false \
+          s3a://datatest/spark-pi-s3.py
+
+    - name: Verify result in MinIO
+      run: |
+        export KUBECONFIG=/root/.kube/config
+        MINIO_IP=$(kubectl -n minio get svc minio -o jsonpath='{.spec.clusterIP}')
+        kubectl run mc-verify --rm -it \
+          --image=minio/mc:latest --restart=Never --command -- sh -c "
+            mc alias set myminio http://${MINIO_IP}:9000 minioadmin minioadmin
+            mc ls myminio/datatest/spark-output/pi_result.csv/
+            mc cat myminio/datatest/spark-output/pi_result.csv/part-00001-*.csv
+          "
