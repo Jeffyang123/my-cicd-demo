@@ -50,17 +50,14 @@ jobs:
       run: |
         export KUBECONFIG=/root/.kube/config
         MINIO_IP=$(kubectl -n minio get svc minio -o jsonpath='{.spec.clusterIP}')
-        kubectl run mc-verify --rm --attach \
-          --image=minio/mc:latest --restart=Never --command -- sh -c "
-            mc alias set myminio http://${MINIO_IP}:9000 minioadmin minioadmin
-            echo '=== List output files ==='
-            mc ls myminio/datatest/spark-output/pi_result.csv/
-            echo '=== Read first part file ==='
-            PART_FILE=\$(mc ls myminio/datatest/spark-output/pi_result.csv/ | grep 'part-' | awk '{print \$NF}' | head -1)
-            if [ -n \"\$PART_FILE\" ]; then
-              mc cat myminio/datatest/spark-output/pi_result.csv/\$PART_FILE
-            else
-              echo 'No part file found'
-              exit 1
-            fi
-          "
+        mc alias set myminio http://${MINIO_IP}:9000 minioadmin minioadmin
+        echo "=== List output files ==="
+        mc ls myminio/datatest/spark-output/pi_result.csv/
+        echo "=== Read first part file ==="
+        PART_FILE=$(mc ls myminio/datatest/spark-output/pi_result.csv/ | grep 'part-' | head -1 | awk '{print $NF}')
+        if [ -n "$PART_FILE" ]; then
+          mc cat myminio/datatest/spark-output/pi_result.csv/$PART_FILE
+        else
+          echo "No part file found"
+          exit 1
+        fi
